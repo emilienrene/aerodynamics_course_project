@@ -1,3 +1,13 @@
+%%% NACA0018 curve fitting from 3D to 2D %%%
+%%% Everything runs on computation/main.m %%%
+
+clc;
+clear;
+close;
+
+projectRoot = fileparts(fileparts(mfilename('fullpath')));
+addpath(genpath(projectRoot));
+
 eq = equations();
 
 data = readtable('data/data4group20.dat', 'FileType', 'text');
