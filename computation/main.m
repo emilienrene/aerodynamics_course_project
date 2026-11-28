@@ -84,3 +84,30 @@ function err = lossCoupled(p, eq, alpha_fit, CL_fit, c, U_inf, N)
     CL_pred = eq.coupledLLT_GE(alpha_fit, AR, h, c, U_inf, N);
     err = sum((CL_pred - CL_fit).^2);
 end
+
+%% Center of pressure estimation (x_cp / c)
+valid_cp = abs(data.CL) > 0.05;             % Avoid division by ~0 near alpha = 0
+
+data.xcp = NaN(height(data), 1);
+data.xcp(valid_cp) = eq.xcp(data.CL(valid_cp), data.CM_LE(valid_cp));
+
+% Propagated uncertainty from CLstd and CM_LEstd
+data.xcp_std = NaN(height(data), 1);
+data.xcp_std(valid_cp) = (1 ./ abs(data.CL(valid_cp))) .* sqrt( ...
+    data.CM_LEstd(valid_cp).^2 + ...
+    (data.xcp(valid_cp) .* data.CLstd(valid_cp)).^2 );
+
+% Mean x_cp / c in the attached regime (excluding |alpha| < 1 deg)
+att_idx = valid_cp & data.alpha >= -5 & data.alpha <= 10;
+fprintf('Mean experimental x_cp/c (attached): %.3f +/- %.3f (Theory: 0.250)\n', ...
+    mean(data.xcp(att_idx)), std(data.xcp(att_idx)));
+
+% Plot 3: Center of pressure vs angle of attack
+figure; hold on; grid on;
+errorbar(data.alpha, data.xcp, data.xcp_std, 'ko', 'DisplayName', 'Experiment x_{cp}/c');
+yline(0.25, 'r--', 'LineWidth', 1.6, 'DisplayName', 'Theory (c/4 = 0.25)');
+xlabel('\alpha [deg]');
+ylabel('x_{cp} / c');
+title('Center of Pressure Location vs. Angle of Attack');
+xlim([-6 21]); ylim([0.15 0.45]);
+legend('Location', 'northwest');

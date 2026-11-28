@@ -13,6 +13,9 @@ function eq = equations()
     % Coupled 3D Prandtl Lifting-Line + 2D Lumped-Vortex Ground Effect
     eq.coupledLLT_GE = @solveCoupledLLT_GE;
 
+    % Center of pressure x_cp / c = -CM_LE / CL (masked where |CL| is near 0)
+    eq.xcp = @(CL, CM_LE) -CM_LE ./ CL;
+
 end
 
 function [CL, dist] = solveCoupledLLT_GE(alpha_deg, AR, h, c, U_inf, N)
