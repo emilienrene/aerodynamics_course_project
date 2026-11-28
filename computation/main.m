@@ -10,6 +10,8 @@ projectRoot = fileparts(fileparts(mfilename('fullpath')));
 addpath(genpath(projectRoot));
 run("config\variables.m");
 
+if ~exist('c', 'var'), c = 0.15; end
+if ~exist('u_infinity', 'var'), u_infinity = 1.0; end
 
 eq = equations();
 
@@ -18,28 +20,16 @@ data.Cl_2D   = eq.cl2D(data.alpha);
 data.alpha_i = eq.inducedAngle(data.alpha, data.CL);
 data.w       = eq.downwash(data.alpha_i, u_infinity);
 
-%% 1. Restrict fit to linear / attached regime (avoid stall > 14 deg)
-linIdx = data.alpha >= -5 & data.alpha <= 10;
+%% 1. Fit (AR, h) in the attached-flow regime (-5 to 10 deg)
+linIdx    = data.alpha >= -5 & data.alpha <= 10;
 alpha_fit = data.alpha(linIdx);
 CL_fit    = data.CL(linIdx);
 
-%% 2. Fit (AR, h) using nonlinear least squares (fminsearch)
-N_modes = 20;
-function err = lossCoupled(p, alpha_fit, CL_fit, c, N)
-    AR = p(1); h = p(2);
-    if AR < 0.5 || AR > 20 || h < 0.1*c || h > 5*c
-        err = 1e9;
-        return;
-    end
-    CL_pred = eq.liftingLineGE(alpha_fit, AR, h, c, N);
-    err = sum((CL_pred - CL_fit).^2);
-end
-%lossFn = @(p) lossCoupled(alpha_fit, p(1), p(2), c, N_modes) ;
-lossFn = @(p) sum((eq.liftingLineGE(alpha_fit, p(1), p(2), c, N_modes) - CL_fit).^2);
+N_modes = 15;
+lossFn  = @(p) lossCoupled(p, eq, alpha_fit, CL_fit, c, u_infinity, N_modes);
 
-% Initial guess: [AR_guess, h_guess (m)]
-p0 = [4.0, 0.15];
-opts = optimset('Display', 'off');
+p0    = [4.0, 0.10];    % Initial guess: [AR, h (m)]
+opts  = optimset('Display', 'off');
 p_opt = fminsearch(lossFn, p0, opts);
 
 AR_opt = p_opt(1);
@@ -47,22 +37,50 @@ h_opt  = p_opt(2);
 fprintf('Fitted effective AR = %.3f, h = %.4f m (h/c = %.2f)\n', ...
     AR_opt, h_opt, h_opt / c);
 
-%% 3. Evaluate models and plot comparison
-data.CL_LLT_GE = eq.liftingLineGE(data.alpha, AR_opt, h_opt, c, N_modes);
-data.CL_2D_GE  = eq.lumpedVortex2D(data.alpha, h_opt, c);
+%% 2. Evaluate fitted curve and spanwise distributions at a chosen alpha
+data.CL_coupled = eq.coupledLLT_GE(data.alpha, AR_opt, h_opt, c, u_infinity, N_modes);
 
+alpha_plot = 8; % Angle of attack [deg] for spanwise distribution plots
+[~, dist] = eq.coupledLLT_GE(alpha_plot, AR_opt, h_opt, c, u_infinity, N_modes);
+
+%% 3. Plots
 p = plot_data();
 p.lift(data);
 p.moment(data);
 
-% Quick overlay plot of experimental data vs. lifting-line ground effect
+% Plot 1: Experimental CL vs Coupled 3D LLT + GE fit
 figure; hold on; grid on;
 errorbar(data.alpha, data.CL, data.CLstd, 'ko', 'DisplayName', 'Experiment');
 plot(data.alpha, data.Cl_2D, '--', 'DisplayName', '2D Thin Airfoil');
-plot(data.alpha, data.CL_LLT_GE, 'r-', 'LineWidth', 1.8, ...
-    'DisplayName', sprintf('3D LLT + GE (AR=%.2f, h=%.3fm)', AR_opt, h_opt));
-plot(data.alpha, data.CL_2D_GE, 'b-.', 'LineWidth', 1.2, ...
-    'DisplayName', '2D Lumped Vortex + GE');
+plot(data.alpha, data.CL_coupled, 'r-', 'LineWidth', 1.8, ...
+    'DisplayName', sprintf('Coupled LLT + GE (AR=%.2f, h/c=%.2f)', AR_opt, h_opt/c));
 xlabel('\alpha [deg]'); ylabel('C_L');
 xlim([-6 16]); ylim([-0.5 1.5]);
 legend('Location', 'northwest');
+
+% Plot 2: Spanwise alpha_eff(y) and Gamma(y) distributions
+figure;
+subplot(2, 1, 1); hold on; grid on;
+plot(dist.y, dist.alpha_eff, 'b-o', 'LineWidth', 1.5, 'MarkerSize', 4);
+yline(alpha_plot, '--k', sprintf('Geometric \\alpha = %g^\\circ', alpha_plot));
+xlabel('Spanwise position y [m]');
+ylabel('\alpha_{eff} [deg]');
+title(sprintf('Spanwise Distributions at \\alpha = %g^\\circ (AR = %.2f, h/c = %.2f)', ...
+    alpha_plot, AR_opt, h_opt/c));
+
+subplot(2, 1, 2); hold on; grid on;
+plot(dist.y, dist.Gamma, 'r-o', 'LineWidth', 1.5, 'MarkerSize', 4);
+xlabel('Spanwise position y [m]');
+ylabel('\Gamma(y) [m^2/s]');
+
+%% Local helper function for bounded least squares
+function err = lossCoupled(p, eq, alpha_fit, CL_fit, c, U_inf, N)
+    AR = p(1);
+    h  = p(2);
+    if AR < 0.5 || AR > 20 || h < 0.1*c || h > 5*c
+        err = 1e9;
+        return;
+    end
+    CL_pred = eq.coupledLLT_GE(alpha_fit, AR, h, c, U_inf, N);
+    err = sum((CL_pred - CL_fit).^2);
+end
